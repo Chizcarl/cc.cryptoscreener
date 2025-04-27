@@ -54,11 +54,7 @@ limiter = Limiter(
 
 csp = {
     'default-src': ["'self'"],
-    'script-src': [
-        "'self'",
-        's3.tradingview.com',
-        "'unsafe-inline'"
-    ],
+    'script-src': ["'self'", 's3.tradingview.com', "'unsafe-inline'"],
     'style-src': ["'self'", 'fonts.googleapis.com', "'unsafe-inline'"],
     'img-src': ["'self'", 'data:', '*.tradingview.com'],
     'font-src': ["'self'", 'fonts.gstatic.com'],
@@ -82,6 +78,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("No DATABASE_URL set for Flask application")
 
+engine = None
+SessionLocal = None
+Base = None
+
 try:
     engine_url = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     engine = create_engine(engine_url, pool_size=5, max_overflow=10, echo=False)
@@ -90,35 +90,39 @@ try:
     app.logger.info("SQLAlchemy engine and session configured.")
 except Exception as e:
     app.logger.error(f"Error creating SQLAlchemy engine: {e}", exc_info=True)
-    engine = None
-    SessionLocal = None
-    Base = None
 
-class User(UserMixin, Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(50), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    is_admin = Column(Boolean, default=False, nullable=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    watchlist_items = relationship("WatchlistItem", back_populates="owner", cascade="all, delete-orphan")
 
-class WatchlistItem(Base):
-    __tablename__ = "watchlist"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    name = Column(String(50), nullable=False, index=True)
-    grade = Column(String(1), nullable=False)
-    price_at_add = Column(Float)
-    volume_at_add = Column(String(20))
-    rsi_4hr_at_add = Column(Float)
-    rsi_d_at_add = Column(Float)
-    ema_4hr_at_add = Column(String(10))
-    ema_d_at_add = Column(String(10))
-    rating_at_add = Column(Integer)
-    added_timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
-    owner = relationship("User", back_populates="watchlist_items")
-    __table_args__ = (UniqueConstraint('user_id', 'name', name='uq_user_watchlist_item'),)
+if Base:
+    class User(Base, UserMixin):
+        __tablename__ = "users"
+        id = Column(Integer, primary_key=True, index=True)
+        username = Column(String(50), unique=True, index=True, nullable=False)
+        password_hash = Column(String(255), nullable=False)
+        is_admin = Column(Boolean, default=False, nullable=False)
+        created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+        watchlist_items = relationship("WatchlistItem", back_populates="owner", cascade="all, delete-orphan")
+
+    class WatchlistItem(Base):
+        __tablename__ = "watchlist"
+        id = Column(Integer, primary_key=True, index=True)
+        user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+        name = Column(String(50), nullable=False, index=True)
+        grade = Column(String(1), nullable=False)
+        price_at_add = Column(Float)
+        volume_at_add = Column(String(20))
+        rsi_4hr_at_add = Column(Float)
+        rsi_d_at_add = Column(Float)
+        ema_4hr_at_add = Column(String(10))
+        ema_d_at_add = Column(String(10))
+        rating_at_add = Column(Integer)
+        added_timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+        owner = relationship("User", back_populates="watchlist_items")
+        __table_args__ = (UniqueConstraint('user_id', 'name', name='uq_user_watchlist_item'),)
+else:
+    app.logger.error("SQLAlchemy Base not defined due to connection error. Models cannot be defined.")
+    User = None
+    WatchlistItem = None
+
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -128,7 +132,9 @@ login_manager.login_message = "Please log in to access this page."
 
 @login_manager.user_loader
 def load_user(user_id):
-    if not SessionLocal: return None
+    if not SessionLocal or not Base or not User:
+        app.logger.warning("DB Session/Base/User model not available in load_user.")
+        return None
     db = SessionLocal()
     user = None
     try:
@@ -242,7 +248,7 @@ def fetch_and_process_data(selected_exchange='BYBIT'):
     app.logger.info(f"Attempting data fetch for exchange: {selected_exchange}...")
     if selected_exchange not in ALLOWED_EXCHANGES:
         app.logger.error(f"Invalid exchange requested: {selected_exchange}")
-        selected_exchange = 'BYBIT' # Fallback to default
+        selected_exchange = 'BYBIT'
 
     try:
         fetch_cols = [
@@ -363,7 +369,7 @@ def login():
             flash('Invalid username or password.', 'danger')
             return redirect(url_for('login'))
         login_user(user, remember=remember)
-        session['selected_exchange'] = 'BYBIT' # Reset exchange on login
+        session['selected_exchange'] = 'BYBIT'
         flash('Logged in successfully.', 'success')
         next_page = request.args.get('next')
         return redirect(next_page or url_for('index'))
@@ -383,7 +389,6 @@ def logout():
 @admin_required
 def register():
     if request.method == 'POST':
-        # REMOVED Manual CSRF check
         username = request.form.get('username')
         password = request.form.get('password')
         is_admin = True if request.form.get('is_admin') else False
@@ -488,7 +493,6 @@ def set_exchange():
     else:
         return jsonify({"success": False, "message": "Invalid exchange provided."}), 400
 
-
 @app.route('/data/refresh', methods=['POST'])
 @limiter.limit("10 per hour")
 @login_required
@@ -515,7 +519,7 @@ def filter_alpha():
             ema_4hr = criteria.get('ema4hr', 'None'); rsi_4hr = criteria.get('rsi4hr', 'None')
             ema_daily = criteria.get('emaDaily', 'None'); rsi_daily = criteria.get('rsiDaily', 'None')
 
-            filtered_df = current_df # Start with the full dataset for the current exchange
+            filtered_df = current_df
             if ema_4hr != "None" and f'EMA{ema_4hr}|240_original' in filtered_df.columns and 'close|240_original' in filtered_df.columns:
                 ema_col = f'EMA{ema_4hr}|240_original'
                 filtered_df = filtered_df[pd.to_numeric(filtered_df['close|240_original'], errors='coerce') > pd.to_numeric(filtered_df[ema_col], errors='coerce')]
@@ -572,8 +576,8 @@ def filter_alpha():
 @app.route('/watchlist', methods=['GET'])
 @login_required
 def get_watchlist_route():
-    if not SessionLocal:
-        app.logger.error("Database session factory (SessionLocal) not available.")
+    if not SessionLocal or not WatchlistItem:
+        app.logger.error("Database session factory or WatchlistItem model not available.")
         return jsonify({"error": "Database connection not configured.", "data": [], "pagination": {}}), 503
 
     page = request.args.get('page', 1, type=int)
@@ -610,9 +614,7 @@ def get_watchlist_route():
 
     merged_watchlist = []
     with data_lock:
-        live_data_map = {}
         df_copy = data_frame.copy() if data_frame is not None else pd.DataFrame()
-        current_exchange = last_fetched_exchange
 
     if not df_copy.empty:
         live_data_cols = ['name', 'close|240', 'volume', 'RSI|240', 'RSI',
@@ -625,6 +627,10 @@ def get_watchlist_route():
         available_live_cols = [col for col in live_data_cols if col in df_copy.columns]
         live_data_map_df = df_copy[available_live_cols].copy()
         live_data_map = live_data_map_df.set_index('name').to_dict(orient='index')
+    else:
+        live_data_map = {}
+        available_live_cols = []
+
 
     for item_dict in watchlist_base_data:
         live_info = live_data_map.get(item_dict['name'])
@@ -661,7 +667,9 @@ def get_watchlist_route():
 @limiter.limit("60 per minute")
 @login_required
 def add_to_watchlist_route():
-    if not SessionLocal: return jsonify({"success": False, "message": "Database session not available."}), 503
+    if not SessionLocal or not WatchlistItem:
+         return jsonify({"success": False, "message": "Database connection or model not available."}), 503
+
     db = SessionLocal()
     try:
         current_count = db.query(func.count(WatchlistItem.id)).filter_by(user_id=current_user.id).scalar()
@@ -722,7 +730,8 @@ def add_to_watchlist_route():
 @limiter.limit("120 per minute")
 @login_required
 def delete_from_watchlist_route():
-    if not SessionLocal: return jsonify({"success": False, "message": "Database session not available."}), 503
+    if not SessionLocal or not WatchlistItem:
+        return jsonify({"success": False, "message": "Database connection or model not available."}), 503
     db = SessionLocal()
     try:
         data = request.get_json()
@@ -749,7 +758,8 @@ def delete_from_watchlist_route():
 @limiter.limit("5 per hour")
 @login_required
 def delete_all_watchlist_route():
-    if not SessionLocal: return jsonify({"success": False, "message": "Database session not available."}), 503
+    if not SessionLocal or not WatchlistItem:
+        return jsonify({"success": False, "message": "Database connection or model not available."}), 503
     db = SessionLocal()
     try:
         deleted_count = db.query(WatchlistItem).filter_by(user_id=current_user.id).delete()
@@ -766,7 +776,8 @@ def delete_all_watchlist_route():
 @app.route('/watchlist/copy_data', methods=['GET'])
 @login_required
 def get_watchlist_copy_data():
-    if not SessionLocal: return jsonify({"success": False, "message": "Database session not available."}), 503
+    if not SessionLocal or not WatchlistItem:
+        return jsonify({"success": False, "message": "Database connection or model not available."}), 503
     db = SessionLocal()
     watchlist_items = []
     try:
@@ -788,10 +799,19 @@ def initial_fetch():
     fetch_and_process_data('BYBIT')
 
 if __name__ == '__main__':
+    if not Base:
+         Base = declarative_base()
+         app.logger.warning("Re-defined Base in __main__ block.")
+         # Potentially re-define User and WatchlistItem here if needed,
+         # but this structure assumes initial DB connection worked.
     init_db()
     initial_fetch()
     app.logger.info("Starting Flask app...")
     app.run(debug=False, host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
 else:
-    init_db()
-    initial_fetch()
+     if not Base:
+          Base = declarative_base()
+          app.logger.warning("Re-defined Base in 'else' block (Gunicorn likely).")
+          # Potentially re-define User and WatchlistItem here if needed
+     init_db()
+     initial_fetch()
