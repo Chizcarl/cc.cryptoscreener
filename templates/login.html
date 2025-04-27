@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - CC Crypto Screener</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+        .login-container {
+            background-color: var(--color-surface);
+            padding: var(--spacing-xl);
+            border-radius: var(--border-radius);
+            border: 1px solid var(--color-border);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .login-container h1 {
+            color: var(--color-heading);
+            margin-bottom: var(--spacing-lg);
+        }
+        .form-group {
+            margin-bottom: var(--spacing-base);
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: var(--spacing-xs);
+            color: var(--color-text-secondary);
+            font-weight: 500;
+        }
+        .text-input {
+             width: 100%;
+             padding: calc(var(--spacing-sm) * 1.1) var(--spacing-base);
+             background-color: var(--color-surface-alt);
+             color: var(--color-text-primary);
+             border: 1px solid var(--color-border);
+             border-radius: var(--border-radius);
+             font-size: var(--font-size-base);
+        }
+        .text-input:focus {
+             outline: none;
+             border-color: var(--color-accent);
+             box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+        }
+        .button-login {
+            margin-top: var(--spacing-base);
+        }
+        .flash-messages {
+            list-style: none;
+            padding: 0;
+            margin-bottom: var(--spacing-base);
+        }
+        .flash-messages li {
+            padding: var(--spacing-sm) var(--spacing-base);
+            border-radius: var(--border-radius-small);
+            margin-bottom: var(--spacing-sm);
+            font-size: var(--font-size-small);
+        }
+        .flash-success { background-color: rgba(45, 164, 78, 0.2); border: 1px solid var(--color-success); color: var(--color-success); }
+        .flash-danger { background-color: rgba(248, 81, 73, 0.2); border: 1px solid var(--color-danger); color: var(--color-danger); }
+        .flash-warning { background-color: rgba(210, 153, 34, 0.2); border: 1px solid var(--color-warning); color: var(--color-warning); }
+        .flash-info { background-color: rgba(88, 166, 255, 0.2); border: 1px solid var(--color-accent); color: var(--color-accent); }
+         .checkbox-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: var(--spacing-sm);
+            font-size: var(--font-size-small);
+            color: var(--color-text-secondary);
+        }
+        .checkbox-group input {
+            margin-right: var(--spacing-xs);
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Login</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <ul class="flash-messages">
+            {% for category, message in messages %}
+              <li class="flash-{{ category }}">{{ message }}</li>
+            {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('login') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" class="text-input" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" class="text-input" required>
+            </div>
+             <div class="checkbox-group">
+                <input type="checkbox" id="remember" name="remember">
+                <label for="remember">Remember me</label>
+            </div>
+            <button type="submit" class="button button-primary full-width button-login">Login</button>
+        </form>
+    </div>
+</body>
+</html>
